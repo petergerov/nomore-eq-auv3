@@ -78,6 +78,17 @@ range, output) works as usual.
   sidechain signals being aligned. If your host doesn't compensate delay on sidechain
   inputs, line them up by hand.
 
+## Container app
+
+The *NoMore EQ* app hosts the plug-in, so you can try it without a DAW. Launching it once
+also registers the AUv3 with the system.
+
+- **Play / Stop** loops the current source through the plug-in's editor.
+- **Bypass** switches the plug-in out for an A/B comparison.
+- **Source** plays the built-in demo loop or an audio file of your own. The demo loop has a
+  buried pad and a harsh resonant lead, so Cut and Lift are both audible. The files in
+  `TestAudio/` work well too.
+
 ## How it works
 
 `Shared/DSP/`
