@@ -1,4 +1,4 @@
-// NoMore EQ — ERB-spaced band layout and psychoacoustic helpers.
+// NoMore EQ — ERB-spaced band layout (32, 48 or 64 bands) and psychoacoustic helpers.
 //
 // Band spacing follows the ERB-number scale (Glasberg & Moore, 1990), so each
 // band covers a roughly equal slice of the cochlea. Equal-loudness weighting
@@ -12,7 +12,18 @@
 
 namespace nmeq {
 
-constexpr int kNumBands = 32;
+/// The band counts the Bands switch offers, and the most any layout holds.
+constexpr int kBandCounts[] = {32, 48, 64};
+constexpr int kBandCountOptions = int(sizeof(kBandCounts) / sizeof(kBandCounts[0]));
+constexpr int kMaxBands = 64;
+/// The analysis was tuned at this count; finer layouts are normalised to it.
+constexpr int kReferenceBands = 32;
+
+/// Band count for the Bands parameter's index (0, 1, 2), clamped.
+inline int bandCountForIndex(float index) {
+    const int i = std::min(kBandCountOptions - 1, std::max(0, int(std::lround(index))));
+    return kBandCounts[i];
+}
 
 inline double hzToErbNumber(double hz) { return 21.4 * std::log10(1.0 + 0.00437 * hz); }
 inline double erbNumberToHz(double erb) { return (std::pow(10.0, erb / 21.4) - 1.0) / 0.00437; }
@@ -25,18 +36,25 @@ inline double aWeightingDb(double f) {
 }
 
 struct BandLayout {
-    std::array<double, kNumBands> center{};
-    std::array<double, kNumBands> lower{};
-    std::array<double, kNumBands> upper{};
+    int count = kReferenceBands;
+    std::array<double, kMaxBands> center{};
+    std::array<double, kMaxBands> lower{};
+    std::array<double, kMaxBands> upper{};
     double erbStep = 1.0;   // ERB-number distance between neighbouring bands
+    /// erbStep relative to the reference layout over the same range: 1 at
+    /// 32 bands, about 0.5 at 64. Band energies are divided by it so levels
+    /// read as energy per reference band whatever the count.
+    double relativeStep = 1.0;
 
-    void build(double sampleRate) {
+    void build(double sampleRate, int bands = kReferenceBands) {
+        count = std::min(kMaxBands, std::max(2, bands));
         const double fMin = 30.0;
         const double fMax = std::min(18000.0, 0.42 * sampleRate);
         const double e0 = hzToErbNumber(fMin);
         const double e1 = hzToErbNumber(fMax);
-        erbStep = (e1 - e0) / double(kNumBands - 1);
-        for (int k = 0; k < kNumBands; ++k) {
+        erbStep = (e1 - e0) / double(count - 1);
+        relativeStep = double(kReferenceBands - 1) / double(count - 1);
+        for (int k = 0; k < count; ++k) {
             const double e = e0 + k * erbStep;
             center[k] = erbNumberToHz(e);
             lower[k]  = erbNumberToHz(std::max(0.0, e - 0.5 * erbStep));

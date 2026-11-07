@@ -6,7 +6,8 @@ import Foundation
 /// Live band data for the analyzer. Kept apart from `EditorModel` so the 30 Hz
 /// meter updates re-render only the views that draw them, not the whole panel.
 final class BandMeters: ObservableObject {
-    let frequencies: [Float]
+    /// Band centres; changes when the Bands switch picks another count.
+    @Published fileprivate(set) var frequencies: [Float]
     @Published fileprivate(set) var gains: [Float]
     @Published fileprivate(set) var levels: [Float]
     /// The analyzer is listening to the sidechain input rather than the main one.
@@ -99,6 +100,9 @@ final class EditorModel: ObservableObject {
 
     static let specs: [Spec] = [tame, recover, bias, brighten, lowFreq, highFreq, output]
 
+    /// The Bands switch: index 0, 1, 2 of the `bands` parameter.
+    static let bandChoices = [32, 48, 64]
+
     let audioUnit: NoMoreEQAudioUnit
     let meters: BandMeters
     let levels = LevelMeters()
@@ -186,6 +190,19 @@ final class EditorModel: ObservableObject {
 
     func isOn(_ id: String) -> Bool { value(id) >= 0.5 }
 
+    /// The band count the Bands switch is set to.
+    var bandCount: Int {
+        let index = Int(value("bands").rounded())
+        return Self.bandChoices[min(max(index, 0), Self.bandChoices.count - 1)]
+    }
+
+    func selectBandCount(_ count: Int) {
+        guard let index = Self.bandChoices.firstIndex(of: count) else { return }
+        beginEditing("bands")
+        set("bands", AUValue(index))
+        endEditing("bands")
+    }
+
     /// Flips an on/off parameter as one gesture, so hosts record it cleanly.
     func toggle(_ id: String) {
         beginEditing(id)
@@ -223,7 +240,13 @@ final class EditorModel: ObservableObject {
     private func spec(_ id: String) -> Spec? { Self.specs.first { $0.id == id } }
 
     private func pollMeters() {
-        let count = meters.frequencies.count
+        // The render thread switches band count on its own schedule; follow it.
+        let count = audioUnit.bandCount
+        if count != meters.frequencies.count {
+            var freqs = [Float](repeating: 0, count: count)
+            freqs.withUnsafeMutableBufferPointer { audioUnit.copyBandFrequencies($0.baseAddress!, count: count) }
+            meters.frequencies = freqs
+        }
         var g = [Float](repeating: 0, count: count)
         var l = [Float](repeating: 0, count: count)
         g.withUnsafeMutableBufferPointer { gp in

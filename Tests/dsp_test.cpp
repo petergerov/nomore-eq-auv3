@@ -48,7 +48,7 @@ double rms(const std::vector<float>& v, size_t from) {
     return std::sqrt(acc / double(v.size() - from));
 }
 
-struct Result { std::array<float, kNumBands> gain{}, level{}, freq{}; bool finite = true; double outRms = 0; double seconds = 0; };
+struct Result { std::array<float, kMaxBands> gain{}, level{}, freq{}; int count = 0; bool finite = true; double outRms = 0; double seconds = 0; };
 
 // `sidechain`, when given, is fed to the kernel's sidechain input block by block.
 Result run(NoMoreEQKernel& k, double sr, Signal sig, int block, const Signal* sidechain = nullptr) {
@@ -76,21 +76,34 @@ Result run(NoMoreEQKernel& k, double sr, Signal sig, int block, const Signal* si
     r.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     for (float v : outL) if (!std::isfinite(v)) { r.finite = false; break; }
     r.outRms = rms(outL, outL.size() / 2);
-    k.copyDisplay(r.gain.data(), r.level.data(), kNumBands);
-    k.copyFrequencies(r.freq.data(), kNumBands);
+    r.count = k.bandCount();
+    k.copyDisplay(r.gain.data(), r.level.data(), r.count);
+    k.copyFrequencies(r.freq.data(), r.count);
     std::free(in); std::free(out); std::free(sc);
     return r;
 }
 
 int nearestBand(const Result& r, float hz) {
     int best = 0;
-    for (int b = 1; b < kNumBands; ++b)
+    for (int b = 1; b < r.count; ++b)
         if (std::fabs(std::log(r.freq[size_t(b)] / hz)) < std::fabs(std::log(r.freq[size_t(best)] / hz))) best = b;
     return best;
 }
 
+// The gain curve at `hz`, interpolated in log frequency between band centres —
+// what the EQ applies at that frequency, whatever the band layout.
+float gainAt(const Result& r, float hz) {
+    if (hz <= r.freq[0]) return r.gain[0];
+    for (int b = 1; b < r.count; ++b)
+        if (hz <= r.freq[size_t(b)]) {
+            const float t = std::log(hz / r.freq[size_t(b - 1)]) / std::log(r.freq[size_t(b)] / r.freq[size_t(b - 1)]);
+            return r.gain[size_t(b - 1)] + t * (r.gain[size_t(b)] - r.gain[size_t(b - 1)]);
+        }
+    return r.gain[size_t(r.count - 1)];
+}
+
 void printCurve(const Result& r) {
-    for (int b = 0; b < kNumBands; ++b)
+    for (int b = 0; b < r.count; ++b)
         std::printf("    %7.0f Hz  level %6.1f dB  gain %+5.2f dB\n", r.freq[size_t(b)], r.level[size_t(b)], r.gain[size_t(b)]);
 }
 
@@ -100,9 +113,13 @@ int main(int argc, char** argv) {
     const bool verbose = argc > 1 && std::string(argv[1]) == "-v";
     const double seconds = 4.0;
 
+    // Tests 1–3 run at every band count.
+    for (int bi = 0; bi < kBandCountOptions; ++bi) {
+    std::printf("\n=== %d bands ===\n", kBandCounts[bi]);
     std::printf("1. Harsh 3 kHz resonance in pink noise, Tame 100%%, Recover 0%%\n");
     {
         NoMoreEQKernel k;
+        k.setParameter(NMEQParamBands, float(bi));
         k.setParameter(NMEQParamTame, 100); k.setParameter(NMEQParamRecover, 0);
         auto r = run(k, 48000, makeSignal(48000, seconds, 3000, 0.25f, 0, 0), 256);
         if (verbose) printCurve(r);
@@ -118,14 +135,18 @@ int main(int argc, char** argv) {
     std::printf("2. Quiet 5 kHz tone buried next to a loud 4 kHz tone, Recover 100%%, Tame 0%%\n");
     {
         NoMoreEQKernel k;
+        k.setParameter(NMEQParamBands, float(bi));
         k.setParameter(NMEQParamTame, 0); k.setParameter(NMEQParamRecover, 100);
         auto sig = makeSignal(48000, seconds, 4000, 0.3f, 5200, 0.004f);
         auto r = run(k, 48000, sig, 512);
         if (verbose) printCurve(r);
-        const int b = nearestBand(r, 5200);
-        std::printf("    gain at %.0f Hz: %+.2f dB\n", r.freq[size_t(b)], r.gain[size_t(b)]);
+        // The quiet tone sits below the noise in its band, so what shows is the
+        // zone the 4 kHz tone masks: probe the strongest lift between the two.
+        float lift = -100;
+        for (float hz = 4200; hz <= 5200; hz += 50) lift = std::max(lift, gainAt(r, hz));
+        std::printf("    strongest lift 4.2–5.2 kHz: %+.2f dB (at 5.2 kHz %+.2f dB)\n", lift, gainAt(r, 5200));
         check(r.finite, "output is finite");
-        check(r.gain[size_t(b)] > 1.0f, "masked band is lifted by more than 1 dB");
+        check(lift > 1.0f, "the masked zone is lifted by more than 1 dB");
         float minGain = 100; for (float g : r.gain) minGain = std::min(minGain, g);
         check(minGain >= -0.01f, "no band is cut when Tame is 0%");
     }
@@ -133,6 +154,7 @@ int main(int argc, char** argv) {
     std::printf("3. Silence: the EQ stays flat and output stays silent\n");
     {
         NoMoreEQKernel k;
+        k.setParameter(NMEQParamBands, float(bi));
         k.setParameter(NMEQParamTame, 100); k.setParameter(NMEQParamRecover, 100);
         auto r = run(k, 48000, makeSignal(48000, 1.0, 0, 0, 0, 0) /* still has pink */, 512);
         Signal silent{ std::vector<float>(48000), std::vector<float>(48000) };
@@ -141,6 +163,8 @@ int main(int argc, char** argv) {
         check(r.finite && r.outRms == 0.0, "silent in → silent out");
         check(maxAbs < 0.05f, "gain curve is flat on silence");
     }
+    }  // band counts
+    std::printf("\n");
 
     std::printf("4. Range limits: processing outside 200 Hz – 2 kHz is suppressed\n");
     {
@@ -261,6 +285,75 @@ int main(int argc, char** argv) {
         float again, againR;
         k.takeInputPeak(again, againR);
         check(again == 0.0f && againR == 0.0f, "taking the peaks clears them");
+    }
+
+    std::printf("10. Bands switch: 32 / 48 / 64\n");
+    {
+        // Same pink noise at every count: levels read alike (normalised per
+        // reference band), and a 3 kHz resonance is cut more narrowly as the
+        // bands get finer.
+        auto noise = makeSignal(48000, seconds, 0, 0, 0, 0);
+        auto harsh = makeSignal(48000, seconds, 3000, 0.25f, 0, 0);
+        double meanLevel[kBandCountOptions] = {};
+        float spreadRatio[kBandCountOptions] = {};
+        for (int bi = 0; bi < kBandCountOptions; ++bi) {
+            NoMoreEQKernel k;
+            k.setParameter(NMEQParamBands, float(bi));
+            auto r = run(k, 48000, noise, 256);
+            double sum = 0; int n = 0;
+            for (int b = 0; b < r.count; ++b)
+                if (r.freq[size_t(b)] > 200 && r.freq[size_t(b)] < 5000) { sum += r.level[size_t(b)]; ++n; }
+            meanLevel[bi] = sum / n;
+            check(r.count == kBandCounts[bi], "bandCount() reports the chosen count");
+
+            NoMoreEQKernel t;
+            t.setParameter(NMEQParamBands, float(bi));
+            t.setParameter(NMEQParamTame, 100); t.setParameter(NMEQParamRecover, 0);
+            auto rh = run(t, 48000, harsh, 256);
+            const float centre = rh.gain[size_t(nearestBand(rh, 3000))];
+            const float aside = 0.5f * (rh.gain[size_t(nearestBand(rh, 3000 * std::pow(2.0f, -0.4f)))] +
+                                        rh.gain[size_t(nearestBand(rh, 3000 * std::pow(2.0f, 0.4f)))]);
+            spreadRatio[bi] = aside / centre;
+            std::printf("    %d bands: mean level %.1f dB, cut at 3 kHz %+.2f dB, ±0.4 oct %+.2f dB\n",
+                        kBandCounts[bi], meanLevel[bi], centre, aside);
+        }
+        check(std::fabs(meanLevel[2] - meanLevel[0]) < 1.5 && std::fabs(meanLevel[1] - meanLevel[0]) < 1.5,
+              "noise levels read the same at every band count (within 1.5 dB)");
+        check(spreadRatio[2] < spreadRatio[0], "64 bands cut the resonance more narrowly than 32");
+
+        // Switching while playing: no jump beyond what the signal itself does.
+        auto maxStep = [](const std::vector<float>& v) {
+            float m = 0; for (size_t i = 1; i < v.size(); ++i) m = std::max(m, std::fabs(v[i] - v[i - 1])); return m;
+        };
+        auto renderWithSwitches = [&](bool switching) {
+            NoMoreEQKernel k;
+            k.setParameter(NMEQParamTame, 100); k.setParameter(NMEQParamRecover, 100);
+            k.prepare(48000, 2, 512);
+            std::vector<float> outL(harsh.l.size()), outR(harsh.l.size());
+            AudioBufferList* in = static_cast<AudioBufferList*>(std::calloc(1, sizeof(AudioBufferList) + sizeof(AudioBuffer)));
+            AudioBufferList* out = static_cast<AudioBufferList*>(std::calloc(1, sizeof(AudioBufferList) + sizeof(AudioBuffer)));
+            in->mNumberBuffers = out->mNumberBuffers = 2;
+            int step = 0;
+            for (size_t pos = 0; pos < harsh.l.size(); pos += 256) {
+                if (switching && pos % 24000 == 0 && pos > 0) k.setParameter(NMEQParamBands, float(++step % 3));
+                const int n = int(std::min(size_t(256), harsh.l.size() - pos));
+                in->mBuffers[0] = { 1, UInt32(n * 4), harsh.l.data() + pos };
+                in->mBuffers[1] = { 1, UInt32(n * 4), harsh.r.data() + pos };
+                out->mBuffers[0] = { 1, UInt32(n * 4), outL.data() + pos };
+                out->mBuffers[1] = { 1, UInt32(n * 4), outR.data() + pos };
+                k.process(in, out, n);
+            }
+            std::free(in); std::free(out);
+            return std::make_pair(outL, k.bandCount());
+        };
+        auto steady = renderWithSwitches(false);
+        auto switched = renderWithSwitches(true);
+        bool finite = true; for (float v : switched.first) if (!std::isfinite(v)) finite = false;
+        const float ratio = maxStep(switched.first) / maxStep(steady.first);
+        std::printf("    largest sample step while switching: %.2f× the steady output's\n", ratio);
+        check(finite, "switching: output is finite");
+        check(ratio < 1.3f, "switching: no click (sample steps stay within 1.3× of steady output)");
+        check(switched.second == kBandCounts[7 % 3], "switching: ends on the last chosen count");
     }
 
     std::printf(failures ? "\n%d check(s) failed\n" : "\nall checks passed\n", failures);

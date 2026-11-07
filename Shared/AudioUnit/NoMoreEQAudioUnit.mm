@@ -46,7 +46,7 @@ struct InputPullBuffer {
 
 struct FactoryPresetValues {
     const char* name;
-    float values[NMEQParamCount];  // recover, tame, bias, brighten, low, high, output (sidechain is left alone)
+    float values[NMEQParamCount];  // recover, tame, bias, brighten, low, high, output (sidechain and bands are left alone)
 };
 
 const FactoryPresetValues kFactoryPresets[] = {
@@ -141,6 +141,16 @@ NSString* const kParameterStateKey = @"nomoreeq.parameters";
         make(@"highFreq", @"High",     NMEQParamHighFreq, kAudioUnitParameterUnit_Hertz, kAudioUnitParameterFlag_DisplayLogarithmic),
         make(@"output",   @"Output",   NMEQParamOutput,   kAudioUnitParameterUnit_Decibels, 0),
         make(@"sidechain", @"Sidechain", NMEQParamSidechain, kAudioUnitParameterUnit_Boolean, 0),
+        [AUParameterTree createParameterWithIdentifier:@"bands"
+                                                  name:@"Bands"
+                                               address:NMEQParamBands
+                                                   min:NMEQParamMin[NMEQParamBands]
+                                                   max:NMEQParamMax[NMEQParamBands]
+                                                  unit:kAudioUnitParameterUnit_Indexed
+                                              unitName:nil
+                                                 flags:flags
+                                          valueStrings:@[ @"32", @"48", @"64" ]
+                                   dependentParameters:nil],
     ];
     _parameterTree = [AUParameterTree createTreeWithChildren:parameters];
 
@@ -165,6 +175,8 @@ NSString* const kParameterStateKey = @"nomoreeq.parameters";
                 return [NSString stringWithFormat:@"%+.0f%%", v];
             case NMEQParamSidechain:
                 return v >= 0.5f ? @"On" : @"Off";
+            case NMEQParamBands:
+                return [NSString stringWithFormat:@"%d", nmeq::bandCountForIndex(v)];
             default:
                 return [NSString stringWithFormat:@"%.0f%%", v];
         }
@@ -197,10 +209,11 @@ NSString* const kParameterStateKey = @"nomoreeq.parameters";
     if (preset.number >= 0) {
         if (preset.number >= NSInteger(_factoryPresets.count)) return;
         const FactoryPresetValues &values = kFactoryPresets[preset.number];
-        // Presets shape the sound; whether the analyzer listens to the
-        // sidechain is routing, so a preset leaves it as it is.
+        // Presets shape the sound. Whether the analyzer listens to the
+        // sidechain is routing, and the band count is a resolution setting,
+        // so a preset leaves both as they are.
         for (AUParameter *p in _parameterTree.allParameters)
-            if (p.address != NMEQParamSidechain) p.value = values.values[p.address];
+            if (p.address != NMEQParamSidechain && p.address != NMEQParamBands) p.value = values.values[p.address];
         _currentPreset = _factoryPresets[preset.number];
         return;
     }

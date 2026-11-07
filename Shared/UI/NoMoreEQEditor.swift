@@ -138,7 +138,7 @@ private struct EditorHeader: View {
         HStack(alignment: .center, spacing: 10) {
             FinishSelector()
                 .frame(width: 26, height: 26)
-            Wordmark(bandCount: model.meters.frequencies.count)
+            Wordmark(bandCount: model.bandCount)
             Spacer(minLength: 12)
             PresetMenu(model: model)
         }
@@ -227,7 +227,25 @@ private struct AnalyzerPanel: View {
             VStack(spacing: 8) {
                 ResponseView(model: model, meters: meters)
                     .background(LedWindow(cornerRadius: 3))
-                SidechainRow(model: model, meters: meters)
+                // One row where it fits (with the short status if need be),
+                // the band switch on a second row on narrow panels.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        SidechainRow(model: model, meters: meters, status: .long)
+                        Spacer(minLength: 0)
+                        BandsSelector(model: model)
+                    }
+                    HStack(spacing: 10) {
+                        SidechainRow(model: model, meters: meters, status: .short)
+                        Spacer(minLength: 0)
+                        BandsSelector(model: model)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        SidechainRow(model: model, meters: meters, status: .fitting)
+                        BandsSelector(model: model)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }
@@ -237,7 +255,9 @@ private struct AnalyzerPanel: View {
         amber where it cuts. The bars show the level in each of the 32 bands. \
         The dashed line is the Tilt, pivoting at 1 kHz. Sidechain makes \
         the analyzer listen to the plug-in's sidechain input instead of the main \
-        input; the readout beside it says which one it hears.
+        input; the readout beside it says which one it hears. Bands sets the \
+        resolution: 48 or 64 bands treat narrow resonances more precisely, at \
+        a little more CPU.
         """
 }
 
@@ -245,8 +265,11 @@ private struct AnalyzerPanel: View {
 /// analyzer's source; the EQ keeps processing the main input. The readout
 /// says what the analyzer is actually hearing.
 private struct SidechainRow: View {
+    enum Status { case long, short, fitting }
+
     @ObservedObject var model: EditorModel
     @ObservedObject var meters: BandMeters
+    let status: Status
     @Environment(\.gear) private var theme
     @State private var taps = 0
 
@@ -268,16 +291,22 @@ private struct SidechainRow: View {
             .accessibilityAddTraits(isOn ? .isSelected : [])
             .tapFeedback(taps)
 
-            let status = Self.status(isOn: isOn, analyzingSidechain: meters.analyzingSidechain)
-            // The full status where it fits, a short one on narrow panels.
-            ViewThatFits(in: .horizontal) {
-                LedReadout(text: status.long)
-                LedReadout(text: status.short)
+            let text = Self.status(isOn: isOn, analyzingSidechain: meters.analyzingSidechain)
+            Group {
+                switch status {
+                case .long: LedReadout(text: text.long)
+                case .short: LedReadout(text: text.short)
+                case .fitting:
+                    // The full status where it fits, a short one on narrow panels.
+                    ViewThatFits(in: .horizontal) {
+                        LedReadout(text: text.long)
+                        LedReadout(text: text.short)
+                    }
+                }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Analyzer source")
-            .accessibilityValue(status.long)
-            Spacer(minLength: 0)
+            .accessibilityValue(text.long)
         }
     }
 
@@ -287,6 +316,38 @@ private struct SidechainRow: View {
         case (true, false): return ("NO SIDECHAIN INPUT · ANALYZING MAIN", "NO SIDECHAIN INPUT")
         case (false, false): return ("ANALYZING MAIN INPUT", "MAIN INPUT")
         }
+    }
+}
+
+/// Analysis and EQ resolution: three latching buttons, one lit.
+private struct BandsSelector: View {
+    @ObservedObject var model: EditorModel
+    @Environment(\.gear) private var theme
+    @State private var taps = 0
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SilkscreenText(text: "Bands", size: 9)
+                .padding(.trailing, 2)
+            ForEach(EditorModel.bandChoices, id: \.self) { count in
+                let isOn = model.bandCount == count
+                Button {
+                    model.selectBandCount(count)
+                    taps += 1
+                } label: {
+                    Text("\(count)")
+                }
+                .buttonStyle(IlluminatedButtonStyle(isOn: isOn, lampColor: theme.accent))
+                .frame(width: 34, height: 26)
+                .contentShape(Rectangle())
+                .accessibilityLabel("\(count) bands")
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .tapFeedback(taps)
+        .help("Resolution of the analysis and the EQ. More bands treat narrow resonances more precisely, at a little more CPU.")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Bands")
     }
 }
 

@@ -2,14 +2,11 @@
 
 A perceptual, self-adjusting EQ packaged as an **AUv3** for **macOS, iPadOS and iOS**.
 
-NoMore EQ listens to the signal and adjusts 32 bands continuously. **Cut** pulls down
+NoMore EQ listens to the signal and adjusts 32, 48 or 64 bands continuously. **Cut** pulls down
 bands that stick out above the local spectral balance, such as resonances and harshness.
 **Lift** brings up bands that are buried, either masked by louder neighbours or sitting
 in a dip. The processing adds zero latency: analysis runs on a side-chain, and the
 audio passes through minimum-phase filters only.
-
-This is an original, clean-room design built from published psychoacoustics. It contains
-no code, assets or reverse-engineered internals from any commercial product.
 
 ## Controls
 
@@ -22,13 +19,14 @@ no code, assets or reverse-engineered internals from any commercial product.
 | Low/High  | 20 Hz – 20 kHz  | Frequency range that gets processed (soft edges) |
 | Output    | ±12 dB          | Output gain |
 | Sidechain | On / Off        | Analyze the sidechain input instead of the main input (see below) |
+| Bands     | 32 / 48 / 64    | Resolution of the analysis and the EQ; more bands treat narrow resonances more precisely |
 
 The AU parameter identifiers are `tame`, `recover`, `bias`, `brighten`, `lowFreq`, `highFreq`,
-`output` and `sidechain`. Cut, Lift, Lean and Tilt kept the identifiers of their earlier
+`output`, `sidechain` and `bands` (0, 1, 2 for 32, 48, 64). Cut, Lift, Lean and Tilt kept the identifiers of their earlier
 names, so saved sessions and automation still load.
 
 Factory presets: Gentle, Clarity, Tame Harshness, Live Vocal, Mix Bus Polish. Presets
-leave the Sidechain switch as it is, since it is routing rather than sound.
+leave the Sidechain and Bands switches as they are: one is routing, the other resolution.
 
 ## Editor
 
@@ -37,8 +35,8 @@ top-right screw that lays a short explanation over the plate; tap it again (or t
 explanation) to close it.
 
 - **Analyzer:** the applied EQ curve, green where it lifts and amber where it cuts, over
-  the level of each of the 32 bands. The dashed line is the Tilt, pivoting at 1 kHz.
-  Below it are the Sidechain switch and a readout of what the analyzer hears.
+  the level of each band. The dashed line is the Tilt, pivoting at 1 kHz. Below it are
+  the Sidechain switch, a readout of what the analyzer hears, and the Bands switch.
 - **Balance:** Cut, Lift, Lean and Tilt, spread evenly across the plate. Lean and Tilt
   print their scale ends (CUT/LIFT, DARK/BRIGHT).
 - **Range:** Low and High.
@@ -78,16 +76,18 @@ range, output) works as usual.
 
 `Shared/DSP/`
 1. **Analysis** (`PerceptualAnalyzer.hpp`): a Hann-windowed FFT (about 43 ms, 75 % overlap)
-   of the mono sum is integrated into 32 bands spaced on the ERB scale (Glasberg & Moore),
-   weighted by an approximate equal-loudness curve, then smoothed (20 ms attack, 250 ms
-   release).
+   of the mono sum is integrated into 32, 48 or 64 bands spaced on the ERB scale (Glasberg &
+   Moore, `BandLayout.hpp`), weighted by an approximate equal-loudness curve, then smoothed
+   (20 ms attack, 250 ms release). Band levels are normalised to energy per 32-layout band,
+   and the local envelope and masking spread are set in ERB, so finer layouts resolve
+   narrower peaks without cutting or lifting harder overall.
 2. **Decisions**:
    - Each band is compared with its local spectral envelope. Peaks are cut.
    - An asymmetric masking spread (wider upward than downward) gives each band a
      signal-to-mask ratio. Masked bands and dips are lifted.
    - Lifting is gated so the noise floor and silence are never boosted.
    - With Sidechain on, steps 1–2 run on the sidechain input instead (see above).
-3. **Filtering** (`GraphicEQ.hpp`): a cascade of 32 peaking biquads. Band gains are mapped
+3. **Filtering** (`GraphicEQ.hpp`): a cascade of one peaking biquad per band. Band gains are mapped
    to filter gains through a regularised least-squares inverse of the filters' interaction
    matrix, after Välimäki & Liski's *Accurate Cascade Graphic Equalizer* (2017).
    Coefficients glide every 32 samples.
@@ -95,7 +95,12 @@ range, output) works as usual.
    output per side, lock-free; the editor takes it 30 times a second and applies the
    meter ballistics (fall 24 dB/s, peak hold 1.5 s).
 
-CPU use is about 1 % of one core for stereo at 48 kHz on Apple silicon.
+The kernel (`NoMoreEQKernel.hpp`) prepares all three band layouts up front, each with its
+own analyzer and EQ, and all three analyzers keep listening. Switching Bands therefore
+needs no allocation and the new curve is ready at once; the two EQs crossfade over 40 ms.
+
+CPU use is about 1.3 % of one core at 32 bands and 1.6 % at 64, for stereo at 48 kHz on
+Apple silicon.
 
 ## Layout
 

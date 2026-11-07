@@ -11,7 +11,8 @@ typedef struct {
 
 @interface NoMoreEQAudioUnit : AUAudioUnit
 
-/// Number of analysis / EQ bands (32).
+/// Number of analysis / EQ bands in use: 32, 48 or 64, following the Bands
+/// parameter once the render thread has switched. Thread-safe.
 @property (nonatomic, readonly) NSInteger bandCount;
 
 /// Band centre frequencies in Hz.

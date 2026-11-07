@@ -2,7 +2,8 @@
 //
 // Runs on a mono sum of the input, never on the audio path, so it adds no
 // latency. Every hop it:
-//   1. takes a Hann-windowed FFT and integrates power into 32 ERB bands,
+//   1. takes a Hann-windowed FFT and integrates power into 32, 48 or 64 ERB
+//      bands, normalised to energy per reference (32-layout) band,
 //   2. applies equal-loudness weighting to get a perceptual band level,
 //   3. compares each band with its local spectral envelope (peaks → "tame",
 //      dips → "recover"),
@@ -10,6 +11,10 @@
 //      asymmetric spreading function (upward spread of masking is wider than
 //      downward), and lifts bands that are buried ("recover"),
 //   5. smooths the resulting gain curve across bands and over time.
+//
+// Widths that describe the signal (the local envelope, masking) are set in
+// ERB, so a finer layout resolves narrower peaks without cutting or lifting
+// harder overall.
 #pragma once
 
 #include <Accelerate/Accelerate.h>
@@ -43,6 +48,8 @@ public:
     // Allocates. Call from a non-realtime thread.
     void prepare(double sampleRate, const BandLayout& layout) {
         sampleRate_ = sampleRate;
+        n_ = layout.count;
+        relativeStep_ = float(layout.relativeStep);
         fftSize_ = sampleRate <= 50000.0 ? 2048 : (sampleRate <= 100000.0 ? 4096 : 8192);
         log2n_ = vDSP_Length(std::lround(std::log2(double(fftSize_))));
         hop_ = fftSize_ / 4;
@@ -67,7 +74,7 @@ public:
         // Fractional bin → band integration weights.
         const double binHz = sampleRate / double(fftSize_);
         const int lastBin = fftSize_ / 2;
-        for (int b = 0; b < kNumBands; ++b) {
+        for (int b = 0; b < n_; ++b) {
             auto& span = spans_[size_t(b)];
             span.weights.clear();
             span.first = -1;
@@ -81,23 +88,27 @@ public:
             if (span.first < 0) { span.first = 0; span.weights.assign(1, 0.0f); }
         }
 
-        for (int b = 0; b < kNumBands; ++b) {
+        for (int b = 0; b < n_; ++b) {
             centers_[size_t(b)] = float(layout.center[size_t(b)]);
             loudnessWeightDb_[size_t(b)] = float(0.5 * aWeightingDb(layout.center[size_t(b)]));
         }
 
         // Asymmetric spreading function in ERB units. A masker spreads 10 dB
         // + 10 dB/ERB toward higher bands and 10 dB + 25 dB/ERB toward lower.
-        for (int j = 0; j < kNumBands; ++j) {
-            for (int b = 0; b < kNumBands; ++b) {
+        for (int j = 0; j < n_; ++j) {
+            for (int b = 0; b < n_; ++b) {
                 if (j == b) { spread_[size_t(j)][size_t(b)] = 0.0f; continue; }
                 const double dErb = double(b - j) * layout.erbStep;
                 const double attDb = dErb > 0.0 ? 10.0 + 10.0 * dErb : 10.0 + 25.0 * -dErb;
                 spread_[size_t(j)][size_t(b)] = float(std::pow(10.0, -attDb / 10.0));
             }
         }
-        for (int d = 0; d <= kEnvelopeRadius; ++d)
-            envelopeKernel_[size_t(d)] = float(std::exp(-0.5 * (d / 2.0) * (d / 2.0)));
+        // Local envelope: a Gaussian of 2 reference bands (about 2.5 ERB),
+        // cut off at 6, whatever the band count.
+        const double sigma = 2.0 / layout.relativeStep;
+        envelopeRadius_ = std::min(kMaxEnvelopeRadius, int(std::lround(6.0 / layout.relativeStep)));
+        for (int d = 0; d <= envelopeRadius_; ++d)
+            envelopeKernel_[size_t(d)] = float(std::exp(-0.5 * (d / sigma) * (d / sigma)));
 
         const double hopSeconds = double(hop_) / sampleRate;
         attackCoef_  = float(std::exp(-hopSeconds / 0.020));
@@ -133,12 +144,13 @@ public:
         return updated;
     }
 
-    const std::array<float, kNumBands>& gainDb() const { return gainDb_; }
-    const std::array<float, kNumBands>& perceptualLevelDb() const { return perceptualDb_; }
-    const std::array<float, kNumBands>& centers() const { return centers_; }
+    const std::array<float, kMaxBands>& gainDb() const { return gainDb_; }
+    const std::array<float, kMaxBands>& perceptualLevelDb() const { return perceptualDb_; }
+    const std::array<float, kMaxBands>& centers() const { return centers_; }
+    int bandCount() const { return n_; }
 
 private:
-    static constexpr int kEnvelopeRadius = 6;
+    static constexpr int kMaxEnvelopeRadius = 16;
 
     struct BinSpan { int first = 0; std::vector<float> weights; };
 
@@ -171,13 +183,13 @@ private:
         // 1–2. Band energy (attack/release smoothed) → perceptual level.
         double total = 0.0;
         float maxPerceptual = -200.0f;
-        std::array<float, kNumBands> perceptualLin{};
-        for (int b = 0; b < kNumBands; ++b) {
+        std::array<float, kMaxBands> perceptualLin{};
+        for (int b = 0; b < n_; ++b) {
             const auto& span = spans_[size_t(b)];
             double e = 0.0;
             for (size_t i = 0; i < span.weights.size(); ++i)
                 e += double(power_[size_t(span.first) + i]) * double(span.weights[i]);
-            const float ef = float(e * norm_);
+            const float ef = float(e * norm_) / relativeStep_;
             const float coef = ef > energy_[size_t(b)] ? attackCoef_ : releaseCoef_;
             energy_[size_t(b)] = coef * energy_[size_t(b)] + (1.0f - coef) * ef;
             total += energy_[size_t(b)];
@@ -195,23 +207,26 @@ private:
         const float dipThreshold  = 1.5f - 1.0f * s.bias;    // + bias → recover more
         const float maskThreshold = 10.0f + 6.0f * s.bias;
 
-        std::array<float, kNumBands> raw{};
-        for (int b = 0; b < kNumBands; ++b) {
+        std::array<float, kMaxBands> raw{};
+        for (int b = 0; b < n_; ++b) {
             if (!active) { raw[size_t(b)] = 0.0f; continue; }
 
             float num = 0.0f, den = 0.0f;
-            for (int d = -kEnvelopeRadius; d <= kEnvelopeRadius; ++d) {
+            for (int d = -envelopeRadius_; d <= envelopeRadius_; ++d) {
                 const int j = b + d;
-                if (j < 0 || j >= kNumBands) continue;
+                if (j < 0 || j >= n_) continue;
                 const float w = envelopeKernel_[size_t(std::abs(d))] * (d == 0 ? 0.5f : 1.0f);
                 num += w * perceptualDb_[size_t(j)];
                 den += w;
             }
             const float deviation = perceptualDb_[size_t(b)] - num / den;
 
-            float masking = 1e-12f;
-            for (int j = 0; j < kNumBands; ++j)
+            // Levels are per reference band, so weight each masker by how
+            // much of a reference band it spans.
+            float masking = 0.0f;
+            for (int j = 0; j < n_; ++j)
                 masking += perceptualLin[size_t(j)] * spread_[size_t(j)][size_t(b)];
+            masking = masking * relativeStep_ + 1e-12f;
             const float smr = perceptualDb_[size_t(b)] - 10.0f * std::log10(masking);
 
             // Don't lift the noise floor or bands far below everything else.
@@ -226,9 +241,9 @@ private:
         }
 
         // 5. Smooth across bands, then over time.
-        for (int b = 0; b < kNumBands; ++b) {
+        for (int b = 0; b < n_; ++b) {
             const float l = raw[size_t(std::max(0, b - 1))];
-            const float r = raw[size_t(std::min(kNumBands - 1, b + 1))];
+            const float r = raw[size_t(std::min(n_ - 1, b + 1))];
             float target = 0.25f * l + 0.5f * raw[size_t(b)] + 0.25f * r;
             // Smoothing may soften a cut, but must not push a boost into a band
             // that didn't ask for one (e.g. the loud masker next to a buried band).
@@ -249,16 +264,20 @@ private:
     int writePos_ = 0;
     int hopCounter_ = 0;
 
-    std::array<BinSpan, kNumBands> spans_{};
-    std::array<float, kNumBands> centers_{};
-    std::array<float, kNumBands> loudnessWeightDb_{};
-    std::array<std::array<float, kNumBands>, kNumBands> spread_{};
-    std::array<float, kEnvelopeRadius + 1> envelopeKernel_{};
+    int n_ = kReferenceBands;
+    float relativeStep_ = 1.0f;
+    int envelopeRadius_ = 6;
 
-    std::array<float, kNumBands> energy_{};
-    std::array<float, kNumBands> levelDb_{};
-    std::array<float, kNumBands> perceptualDb_{};
-    std::array<float, kNumBands> gainDb_{};
+    std::array<BinSpan, kMaxBands> spans_{};
+    std::array<float, kMaxBands> centers_{};
+    std::array<float, kMaxBands> loudnessWeightDb_{};
+    std::array<std::array<float, kMaxBands>, kMaxBands> spread_{};
+    std::array<float, kMaxEnvelopeRadius + 1> envelopeKernel_{};
+
+    std::array<float, kMaxBands> energy_{};
+    std::array<float, kMaxBands> levelDb_{};
+    std::array<float, kMaxBands> perceptualDb_{};
+    std::array<float, kMaxBands> gainDb_{};
 
     float attackCoef_ = 0.5f, releaseCoef_ = 0.9f, gainCoef_ = 0.9f;
 };

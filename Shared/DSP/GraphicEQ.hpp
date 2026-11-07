@@ -1,4 +1,4 @@
-// NoMore EQ — zero-latency 32-band cascade graphic EQ.
+// NoMore EQ — zero-latency cascade graphic EQ (32, 48 or 64 bands).
 //
 // The analyzer produces a desired gain per band. Because neighbouring peaking
 // filters overlap, setting each filter to its band's gain would overshoot.
@@ -29,7 +29,8 @@ public:
     // Allocates. Call from a non-realtime thread.
     void prepare(double sampleRate, const BandLayout& layout, int channels) {
         channels_ = std::max(1, std::min(channels, kMaxChannels));
-        constexpr int N = kNumBands;
+        n_ = layout.count;
+        const int N = n_;
 
         for (int k = 0; k < N; ++k) {
             const double fc = layout.center[size_t(k)];
@@ -44,8 +45,8 @@ public:
         }
 
         // Design points: every band centre plus the ERB midpoint between neighbours.
-        constexpr int M = kDesignPoints;
-        std::array<double, M> w{};
+        const int M = designPoints();
+        std::array<double, kMaxDesignPoints> w{};
         for (int m = 0; m < M; ++m) {
             double hz;
             if (m % 2 == 0) hz = layout.center[size_t(m / 2)];
@@ -85,18 +86,29 @@ public:
         for (auto& ch : state_) for (auto& s : ch) s = {0.0f, 0.0f};
         targetDb_.fill(0.0f);
         currentDb_.fill(0.0f);
-        for (int k = 0; k < kNumBands; ++k) computeCoefs(k, 0.0f);
+        for (int k = 0; k < n_; ++k) computeCoefs(k, 0.0f);
     }
 
+    /// Jump straight to the target gains and start from silence. For an EQ
+    /// that is about to be faded in after sitting idle.
+    void snapToTarget() {
+        for (auto& ch : state_) for (auto& s : ch) s = {0.0f, 0.0f};
+        currentDb_ = targetDb_;
+        for (int k = 0; k < n_; ++k) computeCoefs(k, currentDb_[size_t(k)]);
+    }
+
+    int bandCount() const { return n_; }
+
     // Realtime-safe. Desired gain per band (dB) → filter gains.
-    void setBandGainsDb(const std::array<float, kNumBands>& bandDb) {
-        std::array<float, kDesignPoints> t{};
-        for (int m = 0; m < kDesignPoints; ++m)
+    void setBandGainsDb(const std::array<float, kMaxBands>& bandDb) {
+        const int M = designPoints();
+        std::array<float, kMaxDesignPoints> t{};
+        for (int m = 0; m < M; ++m)
             t[size_t(m)] = (m % 2 == 0) ? bandDb[size_t(m / 2)]
                                         : 0.5f * (bandDb[size_t(m / 2)] + bandDb[size_t(m / 2 + 1)]);
-        for (int k = 0; k < kNumBands; ++k) {
+        for (int k = 0; k < n_; ++k) {
             float g = 0.0f;
-            for (int m = 0; m < kDesignPoints; ++m) g += P_[size_t(k)][size_t(m)] * t[size_t(m)];
+            for (int m = 0; m < M; ++m) g += P_[size_t(k)][size_t(m)] * t[size_t(m)];
             targetDb_[size_t(k)] = std::min(18.0f, std::max(-18.0f, g));
         }
     }
@@ -107,7 +119,7 @@ public:
         for (int start = 0; start < frames; start += kSubBlock) {
             const int n = std::min(kSubBlock, frames - start);
 
-            for (int k = 0; k < kNumBands; ++k) {
+            for (int k = 0; k < n_; ++k) {
                 const float diff = targetDb_[size_t(k)] - currentDb_[size_t(k)];
                 if (std::fabs(diff) > 1e-4f) {
                     currentDb_[size_t(k)] += diff * glide_;
@@ -118,7 +130,7 @@ public:
             for (int ch = 0; ch < channels; ++ch) {
                 float* x = io[ch] + start;
                 auto& st = state_[size_t(ch)];
-                for (int k = 0; k < kNumBands; ++k) {
+                for (int k = 0; k < n_; ++k) {
                     const Coefs c = coefs_[size_t(k)];
                     float z1 = st[size_t(k)][0], z2 = st[size_t(k)][1];
                     for (int i = 0; i < n; ++i) {
@@ -136,10 +148,11 @@ public:
         }
     }
 
-    const std::array<float, kNumBands>& filterGainsDb() const { return currentDb_; }
+    const std::array<float, kMaxBands>& filterGainsDb() const { return currentDb_; }
 
 private:
-    static constexpr int kDesignPoints = 2 * kNumBands - 1;
+    static constexpr int kMaxDesignPoints = 2 * kMaxBands - 1;
+    int designPoints() const { return 2 * n_ - 1; }
 
     struct Coefs { float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
 
@@ -193,11 +206,12 @@ private:
     }
 
     int channels_ = 2;
-    std::array<double, kNumBands> cosW_{}, alpha_{};
-    std::array<std::array<float, kDesignPoints>, kNumBands> P_{};
-    std::array<Coefs, kNumBands> coefs_{};
-    std::array<float, kNumBands> targetDb_{}, currentDb_{};
-    std::array<std::array<std::array<float, 2>, kNumBands>, kMaxChannels> state_{};
+    int n_ = kReferenceBands;
+    std::array<double, kMaxBands> cosW_{}, alpha_{};
+    std::array<std::array<float, kMaxDesignPoints>, kMaxBands> P_{};
+    std::array<Coefs, kMaxBands> coefs_{};
+    std::array<float, kMaxBands> targetDb_{}, currentDb_{};
+    std::array<std::array<std::array<float, 2>, kMaxBands>, kMaxChannels> state_{};
     float glide_ = 0.1f;
 };
 
