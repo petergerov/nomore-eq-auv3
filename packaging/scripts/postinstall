@@ -1,0 +1,20 @@
+#!/bin/sh
+# Registers the NoMore EQ AUv3 for the logged-in user so hosts list it
+# without the app having to be launched first.
+
+APP="$2/Applications/NoMore EQ.app"
+[ "$2" = "/" ] && APP="/Applications/NoMore EQ.app"
+APPEX="$APP/Contents/PlugIns/NoMoreEQExtension.appex"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
+USER_NAME=$(stat -f %Su /dev/console)
+if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ] && [ "$USER_NAME" != "loginwindow" ]; then
+    USER_ID=$(id -u "$USER_NAME")
+    launchctl asuser "$USER_ID" sudo -u "$USER_NAME" "$LSREGISTER" -f -R "$APP" || true
+    launchctl asuser "$USER_ID" sudo -u "$USER_NAME" pluginkit -a "$APPEX" || true
+fi
+
+# Make the Audio Unit registry pick up the new component (it restarts on demand).
+killall -9 AudioComponentRegistrar 2>/dev/null || true
+
+exit 0

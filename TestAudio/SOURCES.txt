@@ -1,0 +1,14 @@
+Test audio for NoMore EQ, from Wikimedia Commons. Converted to 48 kHz / 24-bit WAV.
+Not for redistribution without the attribution its license requires.
+
+vocal_female_solo_chant.wav            Public domain                https://commons.wikimedia.org/wiki/File:A_Chantar2.ogg
+vocal_folk_song_unaccompanied.wav      Public domain                https://commons.wikimedia.org/wiki/File:Napoliebelloestinco.ogg
+vocal_acappella_choir.wav              Public domain                https://commons.wikimedia.org/wiki/File:America_the_Beautiful_-_Singing_Sergeants_-_United_States_Air_Force_Band.mp3
+speech_prosody.wav                     CC0                          https://commons.wikimedia.org/wiki/File:Speech_Prosody_audio_example.wav
+guitar_acoustic_sample.wav             Public domain                https://commons.wikimedia.org/wiki/File:AcousticGuitarSample.ogg
+guitar_acoustic_solo_jason_shaw.wav    CC BY 3.0 US (Jason Shaw)    https://commons.wikimedia.org/wiki/File:Jason_Shaw_-_SOLO_ACOUSTIC_GUITAR.ogg
+guitar_bossa_nova.wav                  CC BY 4.0 (giomilko)         https://commons.wikimedia.org/wiki/File:344211_giomilko_c-major-9-bossa-nova-guitar.wav
+guitar_nylon_dominic_miller.wav        CC BY 4.0                    https://commons.wikimedia.org/wiki/File:Dominic_Miller_on_the_nylon_string_guitar.ogg
+piano_satie_gymnopedie3.wav            Public domain                https://commons.wikimedia.org/wiki/File:Satie_Gymnopedie_No._3_for_piano_solo_01.wav
+piano_jazz_improv.wav                  CC BY-SA 4.0                 https://commons.wikimedia.org/wiki/File:Short_jazz_improvisation_for_solo_piano.wav
+drums_beat.wav                         CC BY-SA 3.0                 https://commons.wikimedia.org/wiki/File:Drum_beat.ogg

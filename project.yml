@@ -1,0 +1,75 @@
+name: NoMoreEQ
+
+options:
+  bundleIdPrefix: com.gerov
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "16.0"
+    macOS: "13.0"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: C9LBGZNZ6P
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.1"
+    CURRENT_PROJECT_VERSION: "2"
+    CLANG_CXX_LANGUAGE_STANDARD: c++17
+    CLANG_ENABLE_OBJC_ARC: YES
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SUPPORTS_MACCATALYST: NO
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  # Container app: hosts the extension, plays a demo loop or your own audio
+  # through it, and registers the AUv3 with the system on first launch.
+  NoMoreEQ:
+    type: application
+    platform: [iOS, macOS]
+    sources:
+      - path: App
+        excludes:
+          - "*.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: "NoMore EQ"
+        PRODUCT_MODULE_NAME: nomore_eq
+        PRODUCT_BUNDLE_IDENTIFIER: com.gerov.nomoreeq
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "NoMore EQ"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": App/NoMoreEQ.entitlements
+    dependencies:
+      - target: NoMoreEQExtension_${platform}
+        embed: true
+    scheme: {}
+
+  # The AUv3 effect itself (aufx / nmeq / Riam).
+  NoMoreEQExtension:
+    type: app-extension
+    platform: [iOS, macOS]
+    sources:
+      - path: Shared
+      - path: Extension
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+    dependencies:
+      - sdk: Accelerate.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreAudioKit.framework
+    settings:
+      base:
+        PRODUCT_NAME: NoMoreEQExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.gerov.nomoreeq.auv3
+        INFOPLIST_FILE: Extension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_OBJC_BRIDGING_HEADER: Extension/NoMoreEQExtension-Bridging-Header.h
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Extension/NoMoreEQExtension.entitlements
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
