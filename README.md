@@ -131,6 +131,8 @@ Shared/UI/           SwiftUI editor: analyzer, knobs, IN/OUT meters, info button
 Tests/               Offline DSP checks (`make -C Tests test`)
 TestAudio/           Listening material (Wikimedia Commons; licences in SOURCES.txt)
 scripts/make-pkg.sh  Builds the signed macOS installer package
+icon/make-icon.swift Renders the app icon (see below)
+docs/AppIcon.png     The app icon at 1024 px
 packaging/           Installer distribution file and postinstall script
 ```
 
@@ -196,6 +198,18 @@ on the Mac that built them, but Gatekeeper blocks them once downloaded onto anot
 
 Signing uses team `C9LBGZNZ6P` with automatic provisioning (`project.yml`).
 Bundle IDs are `com.gerov.nomoreeq` and `com.gerov.nomoreeq.auv3`.
+
+## App icon
+
+```sh
+swift icon/make-icon.swift   # -> App/Assets.xcassets/AppIcon.appiconset/ (iOS 1024 px + macOS sizes)
+cp App/Assets.xcassets/AppIcon.appiconset/AppIcon.png docs/AppIcon.png
+```
+
+The icon has the same composition as the J.J. plug-ins' icons (jj-breeze, jj-midnight,
+jj-moon): a painted panel, corner screws, a meter arc, a serif wordmark and jewel lamps. It
+uses the Field Green colourway, so the plug-ins read as one family in different finishes.
+Its colours are the hex values from `GearPalette.fieldGreen`; change them together.
 
 ## Channel support
 
