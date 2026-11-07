@@ -13,20 +13,46 @@ no code, assets or reverse-engineered internals from any commercial product.
 
 ## Controls
 
-| Control  | Range            | What it does |
-|----------|------------------|--------------|
-| Cut      | 0 – 100 %        | Cut dominant or resonant bands (up to −12 dB) |
-| Lift     | 0 – 100 %        | Lift masked or buried bands (up to +9 dB) |
-| Lean     | −100 – +100 %    | Shift the work: − leans toward cutting, + toward lifting |
-| Tilt     | −100 – +100 %    | Tilt the overall balance dark ↔ bright by up to ±1.2 dB/oct around 1 kHz |
-| Low/High | 20 Hz – 20 kHz   | Frequency range that gets processed (soft edges) |
-| Output   | ±12 dB           | Output gain. The IN and OUT meters beside it show the main input and the output, left and right; the top lamp lights at 0 dBFS |
+| Control   | Range           | What it does |
+|-----------|-----------------|--------------|
+| Cut       | 0 – 100 %       | Cut dominant or resonant bands (up to −12 dB) |
+| Lift      | 0 – 100 %       | Lift masked or buried bands (up to +9 dB) |
+| Lean      | −100 – +100 %   | Shift the work: − leans toward cutting, + toward lifting |
+| Tilt      | −100 – +100 %   | Tilt the overall balance dark ↔ bright by up to ±1.2 dB/oct around 1 kHz |
+| Low/High  | 20 Hz – 20 kHz  | Frequency range that gets processed (soft edges) |
+| Output    | ±12 dB          | Output gain |
 | Sidechain | On / Off        | Analyze the sidechain input instead of the main input (see below) |
 
-Each control plate has an ⓘ button that lays a short explanation over the plate.
+The AU parameter identifiers are `tame`, `recover`, `bias`, `brighten`, `lowFreq`, `highFreq`,
+`output` and `sidechain`. Cut, Lift, Lean and Tilt kept the identifiers of their earlier
+names, so saved sessions and automation still load.
 
 Factory presets: Gentle, Clarity, Tame Harshness, Live Vocal, Mix Bus Polish. Presets
 leave the Sidechain switch as it is, since it is routing rather than sound.
+
+## Editor
+
+The editor is a rack unit with four plates. Each plate has an ⓘ button in place of its
+top-right screw that lays a short explanation over the plate; tap it again (or the
+explanation) to close it.
+
+- **Analyzer:** the applied EQ curve, green where it lifts and amber where it cuts, over
+  the level of each of the 32 bands. The dashed line is the Tilt, pivoting at 1 kHz.
+  Below it are the Sidechain switch and a readout of what the analyzer hears.
+- **Balance:** Cut, Lift, Lean and Tilt, spread evenly across the plate. Lean and Tilt
+  print their scale ends (CUT/LIFT, DARK/BRIGHT).
+- **Range:** Low and High.
+- **Output:** the Output knob between the **IN** and **OUT** meters. IN shows the main
+  input before processing (not the sidechain), OUT the signal after EQ and output gain.
+  Each meter has a left and a right column from −48 to 0 dBFS (green up to −18, amber to
+  −6, red above), a peak-hold lamp, and a clip lamp on top that stays lit for 2.5 s after
+  the signal reaches 0 dBFS.
+
+Knobs turn by dragging up or right; double-click (or double-tap) resets one to its
+default. The small rotary switch next to the name cycles the panel finish (Tweed, Field
+Green, Slate); the choice is remembered. The layout follows the host's window: below the
+analyzer, the three control plates share one row when there is room and stack on narrow
+screens.
 
 ## Sidechain
 
@@ -43,6 +69,7 @@ range, output) works as usual.
 - **Uses:** stem mastering (drive each stem's instance with the sum of the stems, so the
   stems sound as if the sum had been processed), ducking content that clashes with
   another track, and sound design.
+- **Meters:** the IN meter always shows the main input, not the sidechain.
 - **Timing:** the plug-in adds no latency, but the result depends on the main and
   sidechain signals being aligned. If your host doesn't compensate delay on sidechain
   inputs, line them up by hand.
@@ -64,6 +91,9 @@ range, output) works as usual.
    to filter gains through a regularised least-squares inverse of the filters' interaction
    matrix, after Välimäki & Liski's *Accurate Cascade Graphic Equalizer* (2017).
    Coefficients glide every 32 samples.
+4. **Metering** (`PeakMeter.hpp`): the kernel keeps the peak of the main input and of the
+   output per side, lock-free; the editor takes it 30 times a second and applies the
+   meter ballistics (fall 24 dB/s, peak hold 1.5 s).
 
 CPU use is about 1 % of one core for stereo at 48 kHz on Apple silicon.
 
@@ -75,7 +105,7 @@ App/                 Container app: demo loop / file player hosting the AU, bypa
 Extension/           AUv3 principal class, Info.plist (aufx · nmeq · Riam), entitlements
 Shared/AudioUnit/    AUAudioUnit subclass (Objective-C++): busses, parameters, presets, state
 Shared/DSP/          Realtime C++ kernel (header-only, Accelerate)
-Shared/UI/           SwiftUI editor: live curve + band levels, knobs, preset menu
+Shared/UI/           SwiftUI editor: analyzer, knobs, IN/OUT meters, info buttons, preset menu
 Tests/               Offline DSP checks (`make -C Tests test`)
 ```
 
@@ -106,6 +136,14 @@ NOTARY_PROFILE=<profile> scripts/make-pkg.sh     # also notarize + staple
   up as *Ria: NoMore EQ* in Logic Pro, GarageBand, Ableton Live and other AU hosts.
 - **iOS / iPadOS:** run the `NoMoreEQ_iOS` scheme on a device. Hosts such as AUM, Logic Pro
   for iPad, GarageBand and Cubasis then list it under effects.
+
+If Logic shows no **Side Chain** menu for NoMore EQ, it is still using a plug-in scan from
+before the sidechain input existed: in *Settings › Plug-in Manager*, select NoMore EQ, choose
+*Reset & Rescan Selection*, then insert the plug-in again. Logic rescans on its own when the
+AU's version changes.
+
+Packages built without `NOTARY_PROFILE` are signed but not notarized: they install fine
+on the Mac that built them, but Gatekeeper blocks them once downloaded onto another Mac.
 
 Signing uses team `C9LBGZNZ6P` with automatic provisioning (`project.yml`).
 Bundle IDs are `com.gerov.nomoreeq` and `com.gerov.nomoreeq.auv3`.
