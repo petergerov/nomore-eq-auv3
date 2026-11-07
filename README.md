@@ -21,9 +21,15 @@ audio passes through minimum-phase filters only.
 | Sidechain | On / Off        | Analyze the sidechain input instead of the main input (see below) |
 | Bands     | 32 / 48 / 64    | Resolution of the analysis and the EQ; more bands treat narrow resonances more precisely |
 
-The AU parameter identifiers are `tame`, `recover`, `bias`, `brighten`, `lowFreq`, `highFreq`,
-`output`, `sidechain` and `bands` (0, 1, 2 for 32, 48, 64). Cut, Lift, Lean and Tilt kept the identifiers of their earlier
-names, so saved sessions and automation still load.
+**Choosing Bands:** 32 bands follow the ear's frequency resolution and suit broad tonal
+balance at the lowest CPU. 48 or 64 bands resolve narrower peaks, such as a ringing snare,
+a whistling resonance or a harsh vowel, and cut them more narrowly and a little deeper.
+Switching while playing crossfades smoothly.
+
+The AU parameter identifiers are `tame`, `recover`, `bias`, `brighten`, `lowFreq`,
+`highFreq`, `output`, `sidechain` and `bands` (0, 1, 2 for 32, 48, 64). Cut, Lift, Lean
+and Tilt kept the identifiers of their earlier names, so saved sessions and automation
+still load.
 
 Factory presets: Gentle, Clarity, Tame Harshness, Live Vocal, Mix Bus Polish. Presets
 leave the Sidechain and Bands switches as they are: one is routing, the other resolution.
@@ -112,7 +118,34 @@ Shared/AudioUnit/    AUAudioUnit subclass (Objective-C++): busses, parameters, p
 Shared/DSP/          Realtime C++ kernel (header-only, Accelerate)
 Shared/UI/           SwiftUI editor: analyzer, knobs, IN/OUT meters, info buttons, preset menu
 Tests/               Offline DSP checks (`make -C Tests test`)
+TestAudio/           Listening material (Wikimedia Commons; licences in SOURCES.txt)
+scripts/make-pkg.sh  Builds the signed macOS installer package
+packaging/           Installer distribution file and postinstall script
 ```
+
+## Tests
+
+```sh
+make -C Tests test           # all checks; exits non-zero on a failure
+make -C Tests test ARGS=-v   # also prints every band's level and gain
+```
+
+The offline checks drive the DSP kernel directly with synthetic signals:
+
+1. A resonance in pink noise is cut, and nothing is boosted with Lift at 0.
+2. The zone masked by a loud tone is lifted, and nothing is cut with Cut at 0.
+3. Silence stays silent and the curve stays flat.
+
+Checks 1–3 run at 32, 48 and 64 bands. The rest cover:
+
+4. Range limits.
+5. Bypass and output gain.
+6. Other sample rates and block sizes.
+7. Mono in, stereo out.
+8. Sidechain.
+9. Level meters.
+10. Bands: levels read alike at every count, 64 bands cut more narrowly, and switching
+    while playing doesn't click.
 
 ## Build
 
@@ -142,10 +175,10 @@ NOTARY_PROFILE=<profile> scripts/make-pkg.sh     # also notarize + staple
 - **iOS / iPadOS:** run the `NoMoreEQ_iOS` scheme on a device. Hosts such as AUM, Logic Pro
   for iPad, GarageBand and Cubasis then list it under effects.
 
-If Logic shows no **Side Chain** menu for NoMore EQ, it is still using a plug-in scan from
-before the sidechain input existed: in *Settings › Plug-in Manager*, select NoMore EQ, choose
-*Reset & Rescan Selection*, then insert the plug-in again. Logic rescans on its own when the
-AU's version changes.
+If Logic shows no **Side Chain** menu for NoMore EQ, or a newly added parameter such as
+**Bands** is missing from its automation list, it is still using an older plug-in scan: in
+*Settings › Plug-in Manager*, select NoMore EQ, choose *Reset & Rescan Selection*, then insert
+the plug-in again. Logic rescans on its own when the AU's version changes.
 
 Packages built without `NOTARY_PROFILE` are signed but not notarized: they install fine
 on the Mac that built them, but Gatekeeper blocks them once downloaded onto another Mac.

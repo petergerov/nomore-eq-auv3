@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
     // Tests 1–3 run at every band count.
     for (int bi = 0; bi < kBandCountOptions; ++bi) {
     std::printf("\n=== %d bands ===\n", kBandCounts[bi]);
-    std::printf("1. Harsh 3 kHz resonance in pink noise, Tame 100%%, Recover 0%%\n");
+    std::printf("1. Harsh 3 kHz resonance in pink noise, Cut 100%%, Lift 0%%\n");
     {
         NoMoreEQKernel k;
         k.setParameter(NMEQParamBands, float(bi));
@@ -128,11 +128,11 @@ int main(int argc, char** argv) {
         check(r.finite, "output is finite");
         check(r.gain[size_t(b)] < -2.0f, "resonant band is cut by more than 2 dB");
         float maxBoost = -100; for (float g : r.gain) maxBoost = std::max(maxBoost, g);
-        check(maxBoost <= 0.01f, "no band is boosted when Recover is 0%");
+        check(maxBoost <= 0.01f, "no band is boosted when Lift is 0%");
         std::printf("    CPU: %.2f%% of realtime (stereo, 48 kHz)\n", 100.0 * r.seconds / seconds);
     }
 
-    std::printf("2. Quiet 5 kHz tone buried next to a loud 4 kHz tone, Recover 100%%, Tame 0%%\n");
+    std::printf("2. Quiet 5 kHz tone buried next to a loud 4 kHz tone, Lift 100%%, Cut 0%%\n");
     {
         NoMoreEQKernel k;
         k.setParameter(NMEQParamBands, float(bi));
@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
         check(r.finite, "output is finite");
         check(lift > 1.0f, "the masked zone is lifted by more than 1 dB");
         float minGain = 100; for (float g : r.gain) minGain = std::min(minGain, g);
-        check(minGain >= -0.01f, "no band is cut when Tame is 0%");
+        check(minGain >= -0.01f, "no band is cut when Cut is 0%");
     }
 
     std::printf("3. Silence: the EQ stays flat and output stays silent\n");
